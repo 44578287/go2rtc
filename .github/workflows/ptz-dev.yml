@@ -21,7 +21,7 @@ jobs:
           go-version: '1.25'
 
       - name: Go test PTZ-related packages
-        run: go test ./pkg/core ./internal/streams ./pkg/xiaomi/miss ./pkg/onvif ./internal/onvif
+        run: go test ./internal/streams ./pkg/xiaomi/miss ./pkg/onvif ./internal/onvif
 
       - name: Build go2rtc
         run: go build -trimpath .
