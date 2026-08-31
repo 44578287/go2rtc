@@ -15,6 +15,7 @@ import (
 type Producer struct {
 	core.Connection
 	client *Client
+	ptz    ptzState
 }
 
 func Dial(rawURL string) (core.Producer, error) {
