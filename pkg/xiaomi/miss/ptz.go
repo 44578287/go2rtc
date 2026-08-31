@@ -9,6 +9,8 @@ import (
 	"github.com/AlexxIT/go2rtc/pkg/core"
 )
 
+const xiaomiPTZSafetyTimeout = 10 * time.Second
+
 type ptzState struct {
 	mu         sync.Mutex
 	timer      *time.Timer
@@ -62,11 +64,13 @@ func (p *Producer) PTZContinuousMove(move core.PTZMove) error {
 	generation := p.ptz.generation
 	p.ptz.moveStatus = core.PTZMoveStatusMoving
 
-	if move.Timeout > 0 {
-		p.ptz.timer = time.AfterFunc(move.Timeout, func() {
-			p.ptzStopGeneration(generation)
-		})
+	timeout := move.Timeout
+	if timeout <= 0 || timeout > xiaomiPTZSafetyTimeout {
+		timeout = xiaomiPTZSafetyTimeout
 	}
+	p.ptz.timer = time.AfterFunc(timeout, func() {
+		p.ptzStopGeneration(generation)
+	})
 
 	return nil
 }
