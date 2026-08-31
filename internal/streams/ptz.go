@@ -19,32 +19,29 @@ type PTZInfo struct {
 	Status       core.PTZStatus       `json:"status"`
 }
 
-// withPTZ resolves the current underlying producer for every command. This is
-// important because stream reconnects may replace a producer connection.
+// withPTZ reuses the current producer session when one is already dialed. For
+// inactive streams it opens a source-specific control-only session so PTZ does
+// not consume a media session or leave an unread media queue behind.
 func (p *Producer) withPTZ(fn func(core.PTZController) error) (bool, error) {
 	p.mu.Lock()
-	wasNone := p.state == stateNone
+	if p.conn != nil {
+		if controller, ok := p.conn.(core.PTZController); ok {
+			err := fn(controller)
+			p.mu.Unlock()
+			return true, err
+		}
+	}
+	source := p.url
 	p.mu.Unlock()
 
-	if err := p.Dial(); err != nil {
-		return false, err
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	controller, ok := p.conn.(core.PTZController)
-	if !ok {
-		// Don't leave an unrelated source connected just because it was probed for
-		// PTZ capability. If another consumer started using it meanwhile, its state
-		// will have advanced beyond stateMedias and it is left untouched.
-		if wasNone && p.state == stateMedias {
-			_ = p.conn.Stop()
-			p.conn = nil
-			p.state = stateNone
-		}
+	controller, cleanup, err := GetPTZController(source)
+	if errors.Is(err, ErrPTZUnsupported) {
 		return false, nil
 	}
+	if err != nil {
+		return false, err
+	}
+	defer cleanup()
 
 	return true, fn(controller)
 }
