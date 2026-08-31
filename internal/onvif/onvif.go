@@ -100,28 +100,22 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 		b = onvif.StaticResponse(operation)
 
 	case onvif.DeviceGetCapabilities:
-		// important for Hass: Media section
 		b = onvif.GetCapabilitiesResponse(r.Host)
 
 	case onvif.DeviceGetServices:
 		b = onvif.GetServicesResponse(r.Host)
 
 	case onvif.DeviceGetDeviceInformation:
-		// important for Hass: SerialNumber (unique server ID)
 		b = onvif.GetDeviceInformationResponse("", "go2rtc", app.Version, r.Host)
 
 	case onvif.DeviceSystemReboot:
 		b = onvif.StaticResponse(operation)
-
-		time.AfterFunc(time.Second, func() {
-			os.Exit(0)
-		})
+		time.AfterFunc(time.Second, func() { os.Exit(0) })
 
 	case onvif.MediaGetVideoSources:
 		b = onvif.GetVideoSourcesResponse(streams.GetAllNames())
 
 	case onvif.MediaGetProfiles:
-		// important for Hass: H264 codec, width, height
 		b = onvif.GetProfilesResponse(streams.GetAllNames())
 
 	case onvif.MediaGetProfile:
@@ -129,7 +123,6 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 		b = onvif.GetProfileResponse(token)
 
 	case onvif.MediaGetVideoSourceConfigurations:
-		// important for Happytime Onvif Client
 		b = onvif.GetVideoSourceConfigurationsResponse(streams.GetAllNames())
 
 	case onvif.MediaGetVideoSourceConfiguration:
@@ -139,9 +132,8 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 	case onvif.MediaGetStreamUri:
 		host, _, err := net.SplitHostPort(r.Host)
 		if err != nil {
-			host = r.Host // in case of Host without port
+			host = r.Host
 		}
-
 		uri := "rtsp://" + host + ":" + rtsp.Port + "/" + onvif.FindTagValue(b, "ProfileToken")
 		b = onvif.GetStreamUriResponse(uri)
 
@@ -194,6 +186,9 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 			writeONVIFFault(w, err)
 			return
 		}
+		if timeout == 0 {
+			timeout = time.Second
+		}
 		if err = streams.PTZContinuousMove(token, core.PTZMove{Pan: pan, Tilt: tilt, Zoom: zoom, Timeout: timeout}); err != nil {
 			writeONVIFFault(w, err)
 			return
@@ -225,7 +220,6 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Trace().Msgf("[onvif] server response:\n%s", b)
-
 	w.Header().Set("Content-Type", "application/soap+xml; charset=utf-8")
 	if _, err = w.Write(b); err != nil {
 		log.Error().Err(err).Caller().Send()
@@ -241,7 +235,6 @@ func writeONVIFFault(w http.ResponseWriter, err error) {
 
 func apiOnvif(w http.ResponseWriter, r *http.Request) {
 	src := r.URL.Query().Get("src")
-
 	var items []*api.Source
 
 	if src == "" {
@@ -250,31 +243,22 @@ func apiOnvif(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 		for _, device := range devices {
 			u, err := url.Parse(device.URL)
 			if err != nil {
 				log.Warn().Str("url", device.URL).Msg("[onvif] broken")
 				continue
 			}
-
 			if u.Scheme != "http" {
 				log.Warn().Str("url", device.URL).Msg("[onvif] unsupported")
 				continue
 			}
-
 			u.Scheme = "onvif"
 			u.User = url.UserPassword("user", "pass")
-
 			if u.Path == onvif.PathDevice {
 				u.Path = ""
 			}
-
-			items = append(items, &api.Source{
-				Name: u.Host,
-				URL:  u.String(),
-				Info: device.Name + " " + device.Hardware,
-			})
+			items = append(items, &api.Source{Name: u.Host, URL: u.String(), Info: device.Name + " " + device.Hardware})
 		}
 	} else {
 		client, err := onvif.NewClient(src)
@@ -282,38 +266,26 @@ func apiOnvif(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 		if l := log.Trace(); l.Enabled() {
 			b, _ := client.MediaRequest(onvif.MediaGetProfiles)
 			l.Msgf("[onvif] src=%s profiles:\n%s", src, b)
 		}
-
 		name, err := client.GetName()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 		tokens, err := client.GetProfilesTokens()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 		for i, token := range tokens {
-			items = append(items, &api.Source{
-				Name: name + " stream" + strconv.Itoa(i),
-				URL:  src + "?subtype=" + token,
-			})
+			items = append(items, &api.Source{Name: name + " stream" + strconv.Itoa(i), URL: src + "?subtype=" + token})
 		}
-
 		if len(tokens) > 0 && client.HasSnapshots() {
-			items = append(items, &api.Source{
-				Name: name + " snapshot",
-				URL:  src + "?subtype=" + tokens[0] + "&snapshot",
-			})
+			items = append(items, &api.Source{Name: name + " snapshot", URL: src + "?subtype=" + tokens[0] + "&snapshot"})
 		}
 	}
-
 	api.ResponseSources(w, items)
 }
