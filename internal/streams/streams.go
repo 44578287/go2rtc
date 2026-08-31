@@ -30,6 +30,7 @@ func Init() {
 	api.HandleFunc("api/streams.dot", apiStreamsDOT)
 	api.HandleFunc("api/preload", apiPreload)
 	api.HandleFunc("api/schemes", apiSchemes)
+	api.HandleFunc("api/ptz", apiPTZ)
 
 	if cfg.Publish == nil && cfg.Preload == nil {
 		return
@@ -46,7 +47,6 @@ func Init() {
 			if err := AddPreload(name, rawQuery); err != nil {
 				log.Error().Err(err).Caller().Send()
 			}
-		}
 	})
 }
 
