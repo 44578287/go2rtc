@@ -40,36 +40,9 @@ func (p *Producer) PTZContinuousMove(move core.PTZMove) error {
 		return fmt.Errorf("xiaomi: PTZ zoom unsupported for model %s", p.client.model)
 	}
 
-	pan := clampPTZ(move.Pan)
-	tilt := clampPTZ(move.Tilt)
-	if pan == 0 && tilt == 0 {
+	horizontal, vertical, speed, stop := dafangPTZMove(move.Pan, move.Tilt)
+	if stop {
 		return p.PTZStop()
-	}
-
-	// The verified Dafang motor command is ff2404(horizontal, vertical, speed).
-	// For V1 we intentionally select the dominant axis instead of assuming that
-	// diagonal movement is supported by every firmware in this family.
-	var horizontal, vertical byte
-	magnitude := math.Abs(pan)
-	if math.Abs(tilt) > magnitude {
-		magnitude = math.Abs(tilt)
-		if tilt > 0 {
-			vertical = 2 // up
-		} else {
-			vertical = 1 // down
-		}
-	} else if pan < 0 {
-		horizontal = 1 // left; verified on hardware, old commented helper was reversed
-	} else {
-		horizontal = 2 // right
-	}
-
-	speed := byte(math.Ceil(magnitude * 9))
-	if speed < 1 {
-		speed = 1
-	}
-	if speed > 9 {
-		speed = 9
 	}
 
 	p.ptz.mu.Lock()
@@ -150,6 +123,40 @@ func (p *Producer) PTZStatus() core.PTZStatus {
 		PanTilt: status,
 		Zoom:    core.PTZMoveStatusUnknown,
 	}
+}
+
+// dafangPTZMove maps normalized ONVIF-style pan/tilt velocity to the motor
+// command verified on physical Dafang hardware. V1 deliberately selects the
+// dominant axis rather than assuming every firmware supports diagonal motion.
+func dafangPTZMove(pan, tilt float64) (horizontal, vertical, speed byte, stop bool) {
+	pan = clampPTZ(pan)
+	tilt = clampPTZ(tilt)
+	if pan == 0 && tilt == 0 {
+		return 0, 0, 0, true
+	}
+
+	magnitude := math.Abs(pan)
+	if math.Abs(tilt) > magnitude {
+		magnitude = math.Abs(tilt)
+		if tilt > 0 {
+			vertical = 2 // up
+		} else {
+			vertical = 1 // down
+		}
+	} else if pan < 0 {
+		horizontal = 1 // left; verified on hardware, old commented helper was reversed
+	} else {
+		horizontal = 2 // right
+	}
+
+	speed = byte(math.Ceil(magnitude * 9))
+	if speed < 1 {
+		speed = 1
+	}
+	if speed > 9 {
+		speed = 9
+	}
+	return horizontal, vertical, speed, false
 }
 
 func clampPTZ(v float64) float64 {
