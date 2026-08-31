@@ -74,8 +74,14 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 	log.Trace().Msgf("[onvif] server request %s %s:\n%s", r.Method, r.RequestURI, b)
 
 	switch operation {
-	case onvif.ServiceGetServiceCapabilities, // important for Hass
-		onvif.DeviceGetNetworkInterfaces, // important for Hass
+	case onvif.ServiceGetServiceCapabilities:
+		if strings.Contains(r.URL.Path, "ptz_service") {
+			b = onvif.PTZGetServiceCapabilitiesResponse()
+		} else {
+			b = onvif.StaticResponse(operation)
+		}
+
+	case onvif.DeviceGetNetworkInterfaces, // important for Hass
 		onvif.DeviceGetSystemDateAndTime, // important for Hass
 		onvif.DeviceSetSystemDateAndTime, // return just OK
 		onvif.DeviceGetDiscoveryMode,
@@ -143,6 +149,74 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 		uri := "http://" + r.Host + "/api/frame.jpeg?src=" + onvif.FindTagValue(b, "ProfileToken")
 		b = onvif.GetSnapshotUriResponse(uri)
 
+	case onvif.PTZGetNodes:
+		b = onvif.PTZGetNodesResponse()
+
+	case onvif.PTZGetNode:
+		b = onvif.PTZGetNodeResponse()
+
+	case onvif.PTZGetConfigurations:
+		b = onvif.PTZGetConfigurationsResponse(streams.GetAllNames())
+
+	case onvif.PTZGetConfiguration:
+		token := onvif.FindTagValue(b, "PTZConfigurationToken")
+		if token == "" {
+			token = onvif.FindTagValue(b, "ConfigurationToken")
+		}
+		b = onvif.PTZGetConfigurationResponse(token)
+
+	case onvif.PTZGetConfigurationOptions:
+		b = onvif.PTZGetConfigurationOptionsResponse()
+
+	case onvif.PTZGetCompatibleConfigurations:
+		token := onvif.FindTagValue(b, "ProfileToken")
+		b = onvif.PTZGetCompatibleConfigurationsResponse(token)
+
+	case onvif.PTZContinuousMove:
+		token := onvif.FindTagValue(b, "ProfileToken")
+		pan, err := onvif.FindTagFloatAttribute(b, "PanTilt", "x")
+		if err != nil {
+			writeONVIFFault(w, err)
+			return
+		}
+		tilt, err := onvif.FindTagFloatAttribute(b, "PanTilt", "y")
+		if err != nil {
+			writeONVIFFault(w, err)
+			return
+		}
+		zoom, err := onvif.FindTagFloatAttribute(b, "Zoom", "x")
+		if err != nil {
+			writeONVIFFault(w, err)
+			return
+		}
+		timeout, err := onvif.ParsePTZTimeout(onvif.FindTagValue(b, "Timeout"))
+		if err != nil {
+			writeONVIFFault(w, err)
+			return
+		}
+		if err = streams.PTZContinuousMove(token, core.PTZMove{Pan: pan, Tilt: tilt, Zoom: zoom, Timeout: timeout}); err != nil {
+			writeONVIFFault(w, err)
+			return
+		}
+		b = onvif.PTZContinuousMoveResponse()
+
+	case onvif.PTZStop:
+		token := onvif.FindTagValue(b, "ProfileToken")
+		if err = streams.PTZStop(token); err != nil {
+			writeONVIFFault(w, err)
+			return
+		}
+		b = onvif.PTZStopResponse()
+
+	case onvif.PTZGetStatus:
+		token := onvif.FindTagValue(b, "ProfileToken")
+		info, err := streams.PTZGetInfo(token)
+		if err != nil {
+			writeONVIFFault(w, err)
+			return
+		}
+		b = onvif.PTZGetStatusResponse(info.Status)
+
 	default:
 		http.Error(w, "unsupported operation", http.StatusBadRequest)
 		log.Warn().Msgf("[onvif] unsupported operation: %s", operation)
@@ -156,6 +230,13 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 	if _, err = w.Write(b); err != nil {
 		log.Error().Err(err).Caller().Send()
 	}
+}
+
+func writeONVIFFault(w http.ResponseWriter, err error) {
+	log.Warn().Err(err).Msg("[onvif] PTZ request failed")
+	w.Header().Set("Content-Type", "application/soap+xml; charset=utf-8")
+	w.WriteHeader(http.StatusInternalServerError)
+	_, _ = w.Write(onvif.FaultResponse(err.Error()))
 }
 
 func apiOnvif(w http.ResponseWriter, r *http.Request) {
