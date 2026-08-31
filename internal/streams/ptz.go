@@ -19,41 +19,50 @@ type PTZInfo struct {
 	Status       core.PTZStatus       `json:"status"`
 }
 
-// withPTZ reuses the current producer session when one is already dialed. For
-// inactive streams it opens a source-specific control-only session so PTZ does
-// not consume a media session or leave an unread media queue behind.
-func (p *Producer) withPTZ(fn func(core.PTZController) error) (bool, error) {
+const (
+	ptzInfoLease    = 2 * time.Second
+	ptzStopLease    = 2 * time.Second
+	ptzDefaultLease = 10 * time.Second
+)
+
+// withPTZ reuses the current media producer session when one is already dialed.
+// For inactive streams it uses a short-lived control-only session, allowing a
+// ContinuousMove followed by Stop without consuming a camera media session.
+func (p *Producer) withPTZ(lease time.Duration, fn func(core.PTZController) error) (bool, error) {
 	p.mu.Lock()
 	if p.conn != nil {
 		if controller, ok := p.conn.(core.PTZController); ok {
-			err := fn(controller)
 			p.mu.Unlock()
-			return true, err
+			releasePTZControlSession(p)
+			return true, fn(controller)
 		}
 	}
 	source := p.url
 	p.mu.Unlock()
 
-	controller, cleanup, err := GetPTZController(source)
+	session, err := acquirePTZControlSession(p, source)
 	if errors.Is(err, ErrPTZUnsupported) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	defer cleanup()
 
-	return true, fn(controller)
+	session.mu.Lock()
+	err = fn(session.controller)
+	session.mu.Unlock()
+	renewPTZControlSession(session, lease)
+	return true, err
 }
 
-func (s *Stream) withPTZ(fn func(core.PTZController) error) error {
+func (s *Stream) withPTZ(lease time.Duration, fn func(core.PTZController) error) error {
 	s.mu.Lock()
 	producers := append([]*Producer(nil), s.producers...)
 	s.mu.Unlock()
 
 	var lastErr error
 	for _, producer := range producers {
-		ok, err := producer.withPTZ(fn)
+		ok, err := producer.withPTZ(lease, fn)
 		if ok {
 			return err
 		}
@@ -75,7 +84,7 @@ func PTZGetInfo(name string) (*PTZInfo, error) {
 	}
 
 	info := new(PTZInfo)
-	err := stream.withPTZ(func(controller core.PTZController) error {
+	err := stream.withPTZ(ptzInfoLease, func(controller core.PTZController) error {
 		info.Capabilities = controller.PTZCapabilities()
 		if !ptzCapabilitiesSupported(info.Capabilities) {
 			return ErrPTZUnsupported
@@ -94,7 +103,13 @@ func PTZContinuousMove(name string, move core.PTZMove) error {
 	if stream == nil {
 		return ErrPTZStreamNotFound
 	}
-	return stream.withPTZ(func(controller core.PTZController) error {
+
+	lease := ptzDefaultLease
+	if move.Timeout > 0 && move.Timeout+2*time.Second > lease {
+		lease = move.Timeout + 2*time.Second
+	}
+
+	return stream.withPTZ(lease, func(controller core.PTZController) error {
 		if !controller.PTZCapabilities().ContinuousMove {
 			return ErrPTZUnsupported
 		}
@@ -107,7 +122,7 @@ func PTZStop(name string) error {
 	if stream == nil {
 		return ErrPTZStreamNotFound
 	}
-	return stream.withPTZ(func(controller core.PTZController) error {
+	return stream.withPTZ(ptzStopLease, func(controller core.PTZController) error {
 		if !ptzCapabilitiesSupported(controller.PTZCapabilities()) {
 			return ErrPTZUnsupported
 		}
