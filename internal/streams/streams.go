@@ -47,6 +47,7 @@ func Init() {
 			if err := AddPreload(name, rawQuery); err != nil {
 				log.Error().Err(err).Caller().Send()
 			}
+		}
 	})
 }
 
