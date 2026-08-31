@@ -80,6 +80,9 @@ func PTZGetInfo(name string) (*PTZInfo, error) {
 	info := new(PTZInfo)
 	err := stream.withPTZ(func(controller core.PTZController) error {
 		info.Capabilities = controller.PTZCapabilities()
+		if !ptzCapabilitiesSupported(info.Capabilities) {
+			return ErrPTZUnsupported
+		}
 		info.Status = controller.PTZStatus()
 		return nil
 	})
@@ -95,6 +98,9 @@ func PTZContinuousMove(name string, move core.PTZMove) error {
 		return ErrPTZStreamNotFound
 	}
 	return stream.withPTZ(func(controller core.PTZController) error {
+		if !controller.PTZCapabilities().ContinuousMove {
+			return ErrPTZUnsupported
+		}
 		return controller.PTZContinuousMove(move)
 	})
 }
@@ -105,8 +111,15 @@ func PTZStop(name string) error {
 		return ErrPTZStreamNotFound
 	}
 	return stream.withPTZ(func(controller core.PTZController) error {
+		if !ptzCapabilitiesSupported(controller.PTZCapabilities()) {
+			return ErrPTZUnsupported
+		}
 		return controller.PTZStop()
 	})
+}
+
+func ptzCapabilitiesSupported(c core.PTZCapabilities) bool {
+	return c.Pan || c.Tilt || c.Zoom || c.ContinuousMove || c.RelativeMove || c.AbsoluteMove || c.Presets
 }
 
 type ptzAPIRequest struct {
