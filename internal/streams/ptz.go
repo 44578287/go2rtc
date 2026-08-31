@@ -22,7 +22,7 @@ type PTZInfo struct {
 const (
 	ptzInfoLease    = 2 * time.Second
 	ptzStopLease    = 2 * time.Second
-	ptzDefaultLease = 10 * time.Second
+	ptzDefaultLease = 12 * time.Second
 )
 
 // withPTZ reuses the current media producer session when one is already dialed.
