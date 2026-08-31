@@ -70,8 +70,11 @@ func GetCapabilitiesResponse(host string) []byte {
 				<tt:RTP_RTSP_TCP>true</tt:RTP_RTSP_TCP>
 			</tt:StreamingCapabilities>
 		</tt:Media>
+		<tt:PTZ>
+			<tt:XAddr>http://%s/onvif/ptz_service</tt:XAddr>
+		</tt:PTZ>
 	</tds:Capabilities>
-</tds:GetCapabilitiesResponse>`, host, host)
+</tds:GetCapabilitiesResponse>`, host, host, host)
 	return e.Bytes()
 }
 
@@ -88,7 +91,12 @@ func GetServicesResponse(host string) []byte {
 		<tds:XAddr>http://%s/onvif/media_service</tds:XAddr>
 		<tds:Version><tt:Major>2</tt:Major><tt:Minor>5</tt:Minor></tds:Version>
 	</tds:Service>
-</tds:GetServicesResponse>`, host, host)
+	<tds:Service>
+		<tds:Namespace>http://www.onvif.org/ver20/ptz/wsdl</tds:Namespace>
+		<tds:XAddr>http://%s/onvif/ptz_service</tds:XAddr>
+		<tds:Version><tt:Major>2</tt:Major><tt:Minor>5</tt:Minor></tds:Version>
+	</tds:Service>
+</tds:GetServicesResponse>`, host, host, host)
 	return e.Bytes()
 }
 
@@ -157,6 +165,7 @@ func appendProfile(e *Envelope, tag, name string) {
 	e.Appendf(`<tt:Name>%s</tt:Name>`, name)
 	appendVideoSourceConfiguration(e, "VideoSourceConfiguration", name)
 	appendVideoEncoderConfiguration(e, "VideoEncoderConfiguration")
+	AppendProfilePTZConfiguration(e, name)
 	e.Appendf(`</trt:%s>`, tag)
 }
 
@@ -265,7 +274,7 @@ var responses = map[string]string{
 	</trt:Capabilities>
 </trt:GetServiceCapabilitiesResponse>`,
 
-	DeviceGetDiscoveryMode:         `<tds:GetDiscoveryModeResponse><tds:DiscoveryMode>Discoverable</tds:DiscoveryMode></tds:GetDiscoveryModeResponse>`,
+	DeviceGetDiscoveryMode:         `<tds:GetDiscoveryModeResponse><tds:DiscoveryMode>Discoverable</tds:GetDiscoveryModeResponse>`,
 	DeviceGetDNS:                   `<tds:GetDNSResponse><tds:DNSInformation /></tds:GetDNSResponse>`,
 	DeviceGetHostname:              `<tds:GetHostnameResponse><tds:HostnameInformation /></tds:GetHostnameResponse>`,
 	DeviceGetNetworkDefaultGateway: `<tds:GetNetworkDefaultGatewayResponse><tds:NetworkGateway /></tds:GetNetworkDefaultGatewayResponse>`,
