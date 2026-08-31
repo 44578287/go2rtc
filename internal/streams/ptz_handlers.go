@@ -1,8 +1,9 @@
 package streams
 
 import (
-	"errors"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/AlexxIT/go2rtc/pkg/core"
 )
@@ -44,17 +45,88 @@ func GetPTZController(source string) (core.PTZController, func(), error) {
 	return nil, nil, ErrPTZUnsupported
 }
 
-func HasPTZHandler(source string) bool {
-	if i := strings.IndexByte(source, ':'); i > 0 {
-		scheme := source[:i]
-		if _, ok := ptzHandlers[scheme]; ok {
-			return true
-		}
-		if _, ok := redirects[scheme]; ok {
-			return true
-		}
-	}
-	return false
+type ptzControlSession struct {
+	producer   *Producer
+	source     string
+	controller core.PTZController
+	cleanup    func()
+	timer      *time.Timer
+	mu         sync.Mutex
 }
 
-var _ = errors.Is // keep imports stable if handler error policy expands
+var (
+	ptzControlSessionsMu sync.Mutex
+	ptzControlSessions   = map[*Producer]*ptzControlSession{}
+)
+
+// acquirePTZControlSession keeps a short-lived control-only connection so an
+// ONVIF ContinuousMove followed by Stop uses the same encrypted camera session.
+// No video stream is started by this path.
+func acquirePTZControlSession(producer *Producer, source string) (*ptzControlSession, error) {
+	ptzControlSessionsMu.Lock()
+	defer ptzControlSessionsMu.Unlock()
+
+	if session := ptzControlSessions[producer]; session != nil {
+		if session.source == source {
+			if session.timer != nil {
+				session.timer.Stop()
+				session.timer = nil
+			}
+			return session, nil
+		}
+		releasePTZControlSessionLocked(producer, session)
+	}
+
+	controller, cleanup, err := GetPTZController(source)
+	if err != nil {
+		return nil, err
+	}
+
+	session := &ptzControlSession{
+		producer: producer, source: source, controller: controller, cleanup: cleanup,
+	}
+	ptzControlSessions[producer] = session
+	return session, nil
+}
+
+func renewPTZControlSession(session *ptzControlSession, lease time.Duration) {
+	if lease <= 0 {
+		lease = 2 * time.Second
+	}
+
+	ptzControlSessionsMu.Lock()
+	defer ptzControlSessionsMu.Unlock()
+
+	if ptzControlSessions[session.producer] != session {
+		return
+	}
+	if session.timer != nil {
+		session.timer.Stop()
+	}
+	session.timer = time.AfterFunc(lease, func() {
+		ptzControlSessionsMu.Lock()
+		defer ptzControlSessionsMu.Unlock()
+		if ptzControlSessions[session.producer] == session {
+			releasePTZControlSessionLocked(session.producer, session)
+		}
+	})
+}
+
+func releasePTZControlSession(producer *Producer) {
+	ptzControlSessionsMu.Lock()
+	defer ptzControlSessionsMu.Unlock()
+	if session := ptzControlSessions[producer]; session != nil {
+		releasePTZControlSessionLocked(producer, session)
+	}
+}
+
+func releasePTZControlSessionLocked(producer *Producer, session *ptzControlSession) {
+	delete(ptzControlSessions, producer)
+	if session.timer != nil {
+		session.timer.Stop()
+		session.timer = nil
+	}
+	if session.cleanup != nil {
+		session.cleanup()
+	}
+}
